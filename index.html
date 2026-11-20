@@ -640,11 +640,12 @@ table.t12 td:first-child{font-weight:400}
   <button id="bMode" title="Toggle auto / click builds (B)"><svg viewBox="0 0 24 24"><path d="M5 12h4l3-8 3 16 3-8h2"/></svg><span>Auto builds</span></button>
   <button id="bGrid" title="Overview (O)"><svg viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg><span>Overview</span></button>
   <button id="bNotes" title="Speaker notes (N)"><svg viewBox="0 0 24 24"><path d="M4 5h16M4 10h16M4 15h10M4 20h7"/></svg><span>Notes</span></button>
+  <button id="bPres" title="Pop-out presenter window (P)"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="13" height="10" rx="1.5"/><path d="M10 18h11V9M7 18v2M14 21h7"/></svg><span>Presenter</span></button>
   <button id="bFs" title="Fullscreen (F)"><svg viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg></button>
 </nav>
 <aside id="notes" aria-label="Speaker notes">
   <header><div><h3>SPEAKER NOTES</h3><div class="ttl" style="font-size:13px;color:rgba(255,255,255,.7);margin-top:4px"></div></div>
-  <div class="row"><div class="timer">00:00<small>/ 30:00</small></div><button id="tReset" title="Restart timer">Reset</button><button id="nClose" title="Close (N)">✕</button></div></header>
+  <div class="row"><div class="timer">00:00<small>/ 30:00</small></div><button id="nPop" title="Pop out to a separate window (P)">Pop out ↗</button><button id="tReset" title="Restart timer">Reset</button><button id="nClose" title="Close (N)">✕</button></div></header>
   <div class="body"></div>
   <div class="nexttitle"></div>
 </aside>
@@ -766,7 +767,7 @@ function go(i, opts){
 }
 function next(){
   var s = slides[cur], ms = maxStep(s);
-  if (mode==='click' && step < ms){ step++; reveal(s, step); return; }
+  if (mode==='click' && step < ms){ step++; reveal(s, step); syncPresenter(); return; }
   if (cur < N-1) go(cur+1);
 }
 function prev(){ if (cur>0) go(cur-1, {all: mode==='click'}); }
@@ -776,7 +777,7 @@ function fit(){ var k = Math.min(innerWidth/1280, innerHeight/720); stage.style.
 addEventListener('resize', fit); fit();
 
 /* ---------- input ---------- */
-addEventListener('keydown', function(e){
+function onKey(e){
   if (e.metaKey||e.ctrlKey||e.altKey) return;
   var k = e.key;
   if (ov.classList.contains('open')){ if (k==='Escape'||k==='o'||k==='O'||k==='g'||k==='G'){ toggleOverview(false); e.preventDefault(); } return; }
@@ -788,7 +789,9 @@ addEventListener('keydown', function(e){
   else if (k==='f'||k==='F'){ toggleFs(); }
   else if (k==='b'||k==='B'){ setMode(mode==='auto'?'click':'auto'); }
   else if (k==='r'||k==='R'){ go(cur,{force:true}); }
-});
+  else if (k==='p'||k==='P'){ openPresenter(); }
+}
+addEventListener('keydown', onKey);
 stage.addEventListener('click', function(e){
   if (e.target.closest('.ix,a,button,mark,.chip')) return;
   if (getSelection && String(getSelection())) return;
@@ -811,6 +814,7 @@ document.getElementById('bNotes').onclick = function(e){ e.stopPropagation(); to
 document.getElementById('bFs').onclick = function(e){ e.stopPropagation(); toggleFs(); };
 function setMode(m){ mode=m; store.set('cw26-mode', m); updateChrome(); flash(m==='auto' ? 'Builds: <b>Auto</b> — each slide animates itself in' : 'Builds: <b>Click</b> — each click/→ reveals the next part'); if (m==='auto'){ var s=slides[cur]; for (var k=step+1;k<=maxStep(s);k++){ (function(k){ timers.push(setTimeout(function(){ reveal(s,k); step=k; }, (k-step)*600)); })(k); } } }
 function updateChrome(){
+  syncPresenter();
   document.getElementById('cnt').textContent = (cur+1)+' / '+N;
   document.getElementById('progress').style.width = ((cur+1)/N*100)+'%';
   var bm = document.getElementById('bMode'); bm.querySelector('span').textContent = mode==='auto' ? 'Auto builds' : 'Click builds'; bm.classList.toggle('act', mode==='click');
@@ -829,7 +833,8 @@ function fillNotes(){
   notes.querySelector('.body').scrollTop = 0;
 }
 function startTimer(){ started=true; t0=Date.now(); clearInterval(tInt); tInt=setInterval(tickTimer, 500); tickTimer(); }
-function tickTimer(){ var s=Math.floor((Date.now()-t0)/1000), m=Math.floor(s/60); var el=notes.querySelector('.timer'); el.firstChild.nodeValue=(m<10?'0':'')+m+':'+((s%60)<10?'0':'')+(s%60); el.style.color = m>=30 ? '#ff7a6b' : (m>=27 ? '#FAAA32' : '#fff'); }
+function tickTimer(){ var s=Math.floor((Date.now()-t0)/1000), m=Math.floor(s/60); var el=notes.querySelector('.timer'); el.firstChild.nodeValue=(m<10?'0':'')+m+':'+((s%60)<10?'0':'')+(s%60); el.style.color = m>=30 ? '#ff7a6b' : (m>=27 ? '#FAAA32' : '#fff');
+  if (pres && !pres.closed){ try{ var pt=pres.document.getElementById('ptm'); pt.firstChild.nodeValue=el.firstChild.nodeValue; pt.style.color=el.style.color; var now=new Date(); pres.document.getElementById('pk').textContent=now.toLocaleTimeString([], {hour:'numeric',minute:'2-digit'}); }catch(e){} } }
 document.getElementById('tReset').onclick = startTimer;
 document.getElementById('nClose').onclick = toggleNotes;
 
@@ -898,11 +903,108 @@ Array.prototype.forEach.call(document.querySelectorAll('.pb'), function(p){
   p.addEventListener('mouseleave', function(){ s.querySelectorAll('tr.hot').forEach(function(tr){ tr.classList.remove('hot'); }); });
 });
 
-window.__deck = {go:go, next:next};
+
+/* ---------- presenter pop-out window ---------- */
+var pres = null, notesSize = +(store.get('cw26-notesize')||22);
+var PRES_CSS = '\
+body{background:#0b0920;color:#fff;font-family:"MontS",sans-serif;height:100vh;display:flex;flex-direction:column;overflow:hidden}\
+.pbar{display:flex;align-items:center;gap:14px;padding:10px 16px;background:#14113a;border-bottom:1px solid rgba(255,255,255,.1);flex:none}\
+.pbar .cnt{font-weight:700;font-size:15px;font-variant-numeric:tabular-nums}\
+.pbar .ptitle{flex:1;font-size:14px;color:rgba(255,255,255,.75);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}\
+.pbar .ptimer{font-weight:700;font-size:26px;font-variant-numeric:tabular-nums}\
+.pbar .ptimer small{font-size:12px;color:rgba(255,255,255,.55);font-weight:500;margin-left:4px}\
+.pbar .clock{font-size:14px;color:rgba(255,255,255,.6);font-variant-numeric:tabular-nums}\
+.pbar button{all:unset;cursor:pointer;background:rgba(255,255,255,.1);padding:9px 14px;border-radius:9px;font:600 13px "MontS",sans-serif;color:#fff}\
+.pbar button:hover{background:rgba(255,255,255,.2)}\
+.pbar button.big{background:#FAAA32;color:#1B1464;padding:9px 18px}\
+.pmain{flex:1;display:grid;grid-template-columns:1.35fr 1fr;grid-template-rows:auto minmax(0,1fr);gap:14px;padding:14px;min-height:0}\
+.pv{position:relative;width:100%;aspect-ratio:16/9;background:#000;border-radius:8px;overflow:hidden;box-shadow:0 8px 30px rgba(0,0,0,.4)}\
+.pv .holder{position:absolute;left:0;top:0;width:1280px;height:720px;transform-origin:0 0;pointer-events:none}\
+.pv .holder .slide{visibility:visible;opacity:1;transform:none;transition:none}\
+.pv *{animation:none!important;transition:none!important}\
+.pv .letters span{opacity:1;transform:none}\
+.pv .mapdots i{opacity:1;transform:scale(1)}\
+.lab{font-size:11px;letter-spacing:.14em;font-weight:700;color:#FAAA32;margin:0 0 6px}\
+.cur-wrap{grid-row:1}\
+.side{grid-row:1;display:flex;flex-direction:column;gap:10px;min-width:0}\
+.build{font-size:14px;color:rgba(255,255,255,.8);background:rgba(255,255,255,.06);border-radius:8px;padding:10px 12px;line-height:1.45}\
+.build b{color:#FAAA32}\
+.pnotes{grid-column:1 / -1;grid-row:2;background:rgba(255,255,255,.04);border:1px solid rgba(255,255,255,.08);border-radius:10px;padding:16px 20px;overflow:auto;white-space:pre-wrap;line-height:1.55;min-height:0}\
+.nhead{display:flex;justify-content:space-between;align-items:center;grid-column:1 / -1;grid-row:2;align-self:start;pointer-events:none}\
+.end{display:flex;align-items:center;justify-content:center;color:rgba(255,255,255,.5);font-size:14px;position:absolute;inset:0}\
+.lost{position:fixed;inset:0;background:rgba(11,9,32,.94);display:none;align-items:center;justify-content:center;text-align:center;font-size:16px;line-height:1.6;padding:30px}\
+.lost.show{display:flex}';
+var PRES_BODY = '\
+<div class="pbar"><span class="cnt" id="pc">1 / 17</span><span class="ptitle" id="pt"></span>\
+<span class="clock" id="pk"></span><span class="ptimer" id="ptm">00:00<small>/ 30:00</small></span>\
+<button id="pr" title="Restart timer">Reset timer</button>\
+<button id="pa" title="Smaller notes">A−</button><button id="pz" title="Larger notes">A+</button>\
+<button id="pp" title="Previous (←)">◀ Back</button><button id="pn" class="big" title="Next (→ / Space)">Next ▶</button></div>\
+<div class="pmain">\
+  <div class="cur-wrap"><p class="lab">NOW SHOWING</p><div class="pv" id="pv1"></div></div>\
+  <div class="side"><p class="lab">UP NEXT</p><div class="pv" id="pv2"></div><div class="build" id="pb"></div></div>\
+  <div class="pnotes" id="pnt"></div>\
+</div>\
+<div class="lost" id="plost">The slide window was closed or reloaded.<br>Close this window and press P (or the Presenter button) in the slides to reconnect.</div>';
+
+function openPresenter(){
+  if (pres && !pres.closed){ try{ pres.focus(); }catch(e){} return; }
+  var w = null;
+  try { w = window.open('', 'cw26presenter', 'popup=yes,width=1180,height=760'); } catch(e){ w = null; }
+  if (!w){ flash('Pop-up blocked here. Open the downloaded .html file in Chrome/Edge to use the presenter window (or press N for in-page notes).'); return; }
+  pres = w;
+  var d = w.document;
+  d.open();
+  d.write('<!DOCTYPE html><html><head><meta charset="utf-8"><title>Presenter view · Building Cyber Resilience</title><style>'+document.querySelector('style').textContent+'</style><style>'+PRES_CSS+'</style></head><body>'+PRES_BODY+'</body></html>');
+  d.close();
+  d.getElementById('pn').onclick = function(){ next(); };
+  d.getElementById('pp').onclick = function(){ prev(); };
+  d.getElementById('pr').onclick = function(){ startTimer(); };
+  d.getElementById('pa').onclick = function(){ notesSize = Math.max(14, notesSize-2); store.set('cw26-notesize', notesSize); syncPresenter(); };
+  d.getElementById('pz').onclick = function(){ notesSize = Math.min(44, notesSize+2); store.set('cw26-notesize', notesSize); syncPresenter(); };
+  w.addEventListener('keydown', function(e){ if (e.key==='p'||e.key==='P') return; onKey(e); });
+  w.addEventListener('resize', fitPreviews);
+  if (!started) startTimer();
+  syncPresenter();
+  document.getElementById('bPres').classList.add('act');
+  var watch = setInterval(function(){ if (!pres || pres.closed){ clearInterval(watch); pres = null; document.getElementById('bPres').classList.remove('act'); } }, 1000);
+}
+function previewInto(box, s){
+  box.innerHTML = '';
+  if (!s){ box.innerHTML = '<div class="end">End of presentation</div>'; return; }
+  var h = pres.document.createElement('div'); h.className = 'holder';
+  var c = s.cloneNode(true); c.classList.remove('cur','leaving','back');
+  Array.prototype.forEach.call(c.querySelectorAll('.a,.draw,[data-s]'), function(el){ el.classList.add('on'); });
+  Array.prototype.forEach.call(c.querySelectorAll('[data-count]'), function(el){ el.textContent = fmt(+el.getAttribute('data-count'), el); });
+  Array.prototype.forEach.call(c.querySelectorAll('[data-fx=type]'), function(el){ if (el._full!=null) el.innerHTML = el._full; el.classList.remove('typing'); });
+  h.appendChild(pres.document.importNode(c, true)); box.appendChild(h);
+}
+function fitPreviews(){
+  if (!pres || pres.closed) return;
+  Array.prototype.forEach.call(pres.document.querySelectorAll('.pv'), function(b){ var h=b.querySelector('.holder'); if (h) h.style.transform = 'scale('+(b.clientWidth/1280)+')'; });
+}
+function syncPresenter(){
+  if (!pres || pres.closed) return;
+  var d = pres.document, s = slides[cur];
+  if (!d.getElementById('pc')) return;
+  d.getElementById('pc').textContent = (cur+1)+' / '+N;
+  d.getElementById('pt').textContent = s.getAttribute('data-title');
+  var nt = d.getElementById('pnt'); nt.textContent = NOTES[cur] || '(No notes for this slide)'; nt.style.fontSize = notesSize+'px';
+  if (pres._shown !== cur){ nt.scrollTop = 0; previewInto(d.getElementById('pv1'), s); previewInto(d.getElementById('pv2'), slides[cur+1]); pres._shown = cur; }
+  var ms = maxStep(s), b = d.getElementById('pb');
+  if (mode==='click' && step < ms) b.innerHTML = 'Builds: <b>Click</b> · part '+(step+1)+' of '+(ms+1)+' shown<br>Next click reveals the next part';
+  else b.innerHTML = 'Builds: <b>'+(mode==='auto'?'Auto':'Click')+'</b><br>Next click: '+(slides[cur+1] ? '<b>'+slides[cur+1].getAttribute('data-title')+'</b>' : 'end of deck');
+  fitPreviews();
+}
+addEventListener('beforeunload', function(){ try{ if (pres && !pres.closed) pres.document.getElementById('plost').classList.add('show'); }catch(e){} });
+document.getElementById('bPres').onclick = function(e){ e.stopPropagation(); openPresenter(); };
+document.getElementById('nPop').onclick = function(){ toggleNotes(); openPresenter(); };
+
+window.__deck = {go:go, next:next, openPresenter:openPresenter};
 /* ---------- start ---------- */
 var start = parseInt((location.hash||'').replace('#',''),10);
 go(isNaN(start)?0:start-1, {force:true});
-setTimeout(function(){ flash('<b>→</b> / click to advance · <b>N</b> notes · <b>O</b> overview · <b>F</b> fullscreen · <b>B</b> builds'); poke(); }, 900);
+setTimeout(function(){ flash('<b>→</b> / click to advance · <b>N</b> notes · <b>O</b> overview · <b>P</b> presenter window · <b>F</b> fullscreen'); poke(); }, 900);
 })();
 </script>
 </body>
